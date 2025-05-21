@@ -15,6 +15,7 @@
 #
 #-------------------------------------------------------------------------------
 import os
+from argparse import Namespace
 from pathlib import Path
 import sys
 import logging
@@ -30,6 +31,13 @@ from elftools.dwarf.locationlists import (
 
 # Global logger
 logger = logging.getLogger(__name__)
+
+# Argument parser guides user in providing the required arguments
+parser = argparse.ArgumentParser()
+parser.add_argument("-b", "--bin", help="absolute path of the binary file", required=True)
+parser.add_argument("-s", "--src", help="name of source code file, e.g. hello.c", required=True)
+parser.add_argument("-f", "--fun", help="name of the function, e.g. foo", required=True)
+args = parser.parse_args()
 
 
 def process_file(binary: str, source_file: str, function: str):
@@ -79,23 +87,18 @@ def process_file(binary: str, source_file: str, function: str):
             if not file == source_file:
                 continue
 
-
-
             print(f"{file}, offset: {CU.cu_offset}, length: {CU['unit_length']} ")
 
-
-            # Display DIEs recursively starting with top_DIE
+            # We iterate through all direct descendants of the CU
             for child in top_DIE.iter_children():
                 die_info_direct_child_of_cu(child, location_lists, loc_parser, CU, dwarf_info, function, indent_level)
 
-            # die_info_rec_top_die(top_DIE, location_lists, loc_parser, CU, dwarf_info, function)
-
 
 def die_info_direct_child_of_cu(die, loc_list: list, loc_parser, CU, dwarfinfo, function, indent_level='    '):
-    """ A recursive function for showing information about a DIE and its
-        children.
     """
-
+        For now we only want global variables and one specific function that are
+        direct descendants of the compilation unit.
+    """
 
     match die.tag:
         case 'DW_TAG_subprogram':
@@ -104,27 +107,20 @@ def die_info_direct_child_of_cu(die, loc_list: list, loc_parser, CU, dwarfinfo, 
                 print(indent_level + 'DIE tag=%s' % die.tag, end="\n")
                 for attr, value in die.attributes.items():
                     if attr in ['DW_AT_name']:
-                        print(f"{indent_level}  | {attr}: {value.value}", end="\n")
+                        print(f"{indent_level}  | {attr}: {value.value.decode('utf-8')}", end="\n")
                     if attr in ['DW_AT_type']:
                         print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
                 child_indent = indent_level + '  '
                 for child in die.iter_children():
                     die_info_rec(child, loc_list, loc_parser, CU, dwarfinfo, child_indent)
 
-        case 'DW_TAG_formal_parameter' | 'DW_TAG_variable':
+        case 'DW_TAG_variable':
             print(f"{indent_level} DIE tag={die.tag}")
             for attr, value in die.attributes.items():
 
                 if attr in ['DW_AT_name']:
-                    print(f"{indent_level}  | {attr}={value.value}")
+                    print(f"{indent_level}  | {attr}={value.value.decode('utf-8')}")
                 if attr in ['DW_AT_type']:
-                    # print(f"die::get_DIE_from_attribute: {die.get_DIE_from_attribute('DW_AT_type')}")
-                    # print(get_base_type(die.get_DIE_from_attribute('DW_AT_type')))
-
-                    # print(f"Bytesize: {t.attributes['DW_AT_byte_size'].raw_value}")
-                    # print(f"Encoding: {encodingMap[t.attributes['DW_AT_encoding'].raw_value]}")
-                    # print(f"Name: {t.attributes['DW_AT_name'].raw_value.decode('utf-8')}")
-
                     print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
 
                 if loc_parser.attribute_has_location(value, CU['version']):
@@ -159,7 +155,7 @@ def die_info_rec(die, loc_list: list, loc_parser, CU, dwarfinfo, indent_level=' 
             print(indent_level + 'DIE tag=%s' % die.tag, end="\n")
             for attr, value in die.attributes.items():
                 if attr in ['DW_AT_name']:
-                    print(f"{indent_level}  | {attr}: {value.value}", end="\n")
+                    print(f"{indent_level}  | {attr}: {value.value.decode('utf-8')}", end="\n")
                 if attr in ['DW_AT_type']:
                     print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
 
@@ -168,22 +164,10 @@ def die_info_rec(die, loc_list: list, loc_parser, CU, dwarfinfo, indent_level=' 
             for attr, value in die.attributes.items():
 
                 if attr in ['DW_AT_name']:
-                    print(f"{indent_level}  | {attr}={value.value}")
+                    print(f"{indent_level}  | {attr}={value.value.decode('utf-8')}")
                 if attr in ['DW_AT_type']:
-                    # print(f"die::get_DIE_from_attribute: {die.get_DIE_from_attribute('DW_AT_type')}")
-                    # print(get_base_type(die.get_DIE_from_attribute('DW_AT_type')))
-                    
-                    
-                    # print(f"Bytesize: {t.attributes['DW_AT_byte_size'].raw_value}")
-                    # print(f"Encoding: {encodingMap[t.attributes['DW_AT_encoding'].raw_value]}")
-                    # print(f"Name: {t.attributes['DW_AT_name'].raw_value.decode('utf-8')}")
-                    
-                    
-                    
                     print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
 
-
-                    
                 if loc_parser.attribute_has_location(value, CU['version']):
                         line = f"{indent_level}  | "
                         loc = loc_parser.parse_from_attribute(value,
@@ -203,8 +187,7 @@ def die_info_rec(die, loc_list: list, loc_parser, CU, dwarfinfo, indent_level=' 
                         print(line)
         case _:
             pass
-    
-            
+
     child_indent = indent_level + '  '
     for child in die.iter_children():
         die_info_rec(child, loc_list, loc_parser, CU, dwarfinfo, child_indent)
@@ -258,6 +241,14 @@ def get_base_type(t) -> str:
                 # logger.error(f"KeyError: {e}, caused by {t}")
                 print(f"KeyError: {e}, caused by {t}")
                 return "const <NO_TYPE>"
+        case 'DW_TAG_typedef':
+            try:
+                pt = t.get_DIE_from_attribute('DW_AT_type')
+                return f"{t.attributes['DW_AT_name'].value.decode('utf-8')} <{get_base_type(pt)}>"
+            except KeyError as e:
+                # logger.error(f"KeyError: {e}, caused by {t}")
+                print(f"KeyError: {e}, caused by {t}")
+                return "typedef <NO_TYPE>"
         case _:
             return ""
 
@@ -287,28 +278,13 @@ def init_logger() -> None:
     logger.addHandler(console_handler)
 
 
-def parse_args() -> Tuple[str, str]:
-    parser = argparse.ArgumentParser()
-    parser.parse_args()
 
-    
-    
-    return "", ""
 
 if __name__ == '__main__':
     init_logger()
-    x, y = parse_args()
 
-    binary = "/home/holaphei/repos/etiss_riscv_examples/build/install/bin/test_cases"
-    source_file = "jdct.c"
-
-
-    fun="jpegdct"
-    
-
-    # Example usage
     # logger.info('BEGIN')
-    process_file(binary=binary, source_file=source_file, function=fun)
+    process_file(binary=args.bin, source_file=args.src, function=args.fun)
     # logger.info('END')
 
     # if sys.argv[1] == '--test':
