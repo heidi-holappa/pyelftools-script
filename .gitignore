@@ -1,3 +1,11 @@
+# Virtual env
 **/venv/
+
+# Log outputs
 **/*.log
+
+# JetBrains Pycharm 
 **/.idea
+
+# Run scripts for local binaries
+run*.sh
