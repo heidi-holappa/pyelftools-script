@@ -103,13 +103,14 @@ def die_info_direct_child_of_cu(die, loc_list: list, loc_parser, CU, dwarfinfo, 
     match die.tag:
         case 'DW_TAG_subprogram':
 
-            if die.attributes['DW_AT_name'].value.decode('utf-8') == function:
+            if 'DW_AT_name' in die.attributes and  die.attributes['DW_AT_name'].value.decode('utf-8') == function:
                 print(indent_level + 'DIE tag=%s' % die.tag, end="\n")
                 for attr, value in die.attributes.items():
                     if attr in ['DW_AT_name']:
                         print(f"{indent_level}  | {attr}: {value.value.decode('utf-8')}", end="\n")
                     if attr in ['DW_AT_type']:
                         print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
+                        print(f"{indent_level}  | DW_AT_byte_size={get_base_type_size(die.get_DIE_from_attribute('DW_AT_type'))}")
                 child_indent = indent_level + '  '
                 for child in die.iter_children():
                     die_info_rec(child, loc_list, loc_parser, CU, dwarfinfo, child_indent)
@@ -122,6 +123,7 @@ def die_info_direct_child_of_cu(die, loc_list: list, loc_parser, CU, dwarfinfo, 
                     print(f"{indent_level}  | {attr}={value.value.decode('utf-8')}")
                 if attr in ['DW_AT_type']:
                     print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
+                    print(f"{indent_level}  | DW_AT_byte_size={get_base_type_size(die.get_DIE_from_attribute('DW_AT_type'))}")
 
                 if loc_parser.attribute_has_location(value, CU['version']):
                     line = f"{indent_level}  | "
@@ -132,13 +134,13 @@ def die_info_direct_child_of_cu(die, loc_list: list, loc_parser, CU, dwarfinfo, 
                     # object (in case the attribute itself contains location
                     # information).
                     if isinstance(loc, LocationExpr):
-                        line += ';DW_AT_location=%s' % (
+                        line += 'DW_AT_location=%s' % (
                             describe_DWARF_expr(loc.loc_expr,
                                                 dwarfinfo.structs, CU.cu_offset))
                     elif isinstance(loc, list):
                         line += show_loclist(loc,
                                              dwarfinfo,
-                                             ';DW_AT_location=', CU.cu_offset)
+                                             'DW_AT_location=', CU.cu_offset)
                     print(line)
         case _:
             pass
@@ -151,14 +153,6 @@ def die_info_rec(die, loc_list: list, loc_parser, CU, dwarfinfo, indent_level=' 
     """
     
     match die.tag:
-        case 'DW_TAG_subprogram':
-            print(indent_level + 'DIE tag=%s' % die.tag, end="\n")
-            for attr, value in die.attributes.items():
-                if attr in ['DW_AT_name']:
-                    print(f"{indent_level}  | {attr}: {value.value.decode('utf-8')}", end="\n")
-                if attr in ['DW_AT_type']:
-                    print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
-
         case 'DW_TAG_formal_parameter' | 'DW_TAG_variable':
             print(f"{indent_level} DIE tag={die.tag}")
             for attr, value in die.attributes.items():
@@ -167,6 +161,7 @@ def die_info_rec(die, loc_list: list, loc_parser, CU, dwarfinfo, indent_level=' 
                     print(f"{indent_level}  | {attr}={value.value.decode('utf-8')}")
                 if attr in ['DW_AT_type']:
                     print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
+                    print(f"{indent_level}  | DW_AT_byte_size={get_base_type_size(die.get_DIE_from_attribute('DW_AT_type'))}")
 
                 if loc_parser.attribute_has_location(value, CU['version']):
                         line = f"{indent_level}  | "
@@ -207,6 +202,57 @@ def show_loclist(loclist, dwarfinfo, indent, cu_offset) -> str:
             d.append(str(loc_entity))
     return '\n'.join(indent + s for s in d)
 
+def get_base_type_size(t) -> str:
+
+    logger.debug("get_base_type::die")
+    logger.debug(t)
+
+
+    match t.tag:
+        case 'DW_TAG_base_type':
+            return f"{t.attributes['DW_AT_byte_size'].value}"
+        case 'DW_TAG_array_type':
+            try:
+                at = t.get_DIE_from_attribute('DW_AT_type')
+                return get_base_type_size(at)
+            except KeyError as e:
+                # logger.error(f"KeyError: {e}, caused by {t}")
+                print(f"KeyError: {e}, caused by {t}")
+                return "NA"
+        case 'DW_TAG_pointer_type':
+            try:
+                pt = t.get_DIE_from_attribute('DW_AT_type')
+                return get_base_type_size(pt)
+            except KeyError as e:
+                #logger.error(f"KeyError: {e}, caused by {t}")
+                print(f"KeyError: {e}, caused by {t}")
+                return "pointer no <NO_TYPE>"
+        case 'DW_TAG_const_type':
+            try:
+                ct = t.get_DIE_from_attribute('DW_AT_type')
+                return get_base_type_size(ct)
+            except KeyError as e:
+                # logger.error(f"KeyError: {e}, caused by {t}")
+                print(f"KeyError: {e}, caused by {t}")
+                return "NA"
+        case 'DW_TAG_typedef':
+            try:
+                td = t.get_DIE_from_attribute('DW_AT_type')
+                return f"{get_base_type_size(td)}"
+            except KeyError as e:
+                # logger.error(f"KeyError: {e}, caused by {t}")
+                print(f"KeyError: {e}, caused by {t}")
+                return "NA"
+        case 'DW_TAG_structure_type':
+            return f"{t.attributes['DW_AT_byte_size'].value}"
+        case 'DW_TAG_class_type':
+            size = "NA"
+            if 'DW_AT_byte_size' in t.attributes:
+                size = t.attributes['DW_AT_byte_size'].value
+            return size
+        case _:
+            return ""
+
 
 def get_base_type(t) -> str:
 
@@ -216,23 +262,23 @@ def get_base_type(t) -> str:
 
     match t.tag:
         case 'DW_TAG_base_type':
-            return t.attributes['DW_AT_name'].value.decode('utf-8')
+            return f"{t.attributes['DW_AT_name'].value.decode('utf-8')}"
         case 'DW_TAG_array_type':
             try:
                 at = t.get_DIE_from_attribute('DW_AT_type')
-                return f"{get_base_type(at)}[]"
+                return f"array of {get_base_type(at)}"
             except KeyError as e:
                 # logger.error(f"KeyError: {e}, caused by {t}")
                 print(f"KeyError: {e}, caused by {t}")
-                return "<NO_TYPE>[]"
+                return "array of <NO_TYPE>"
         case 'DW_TAG_pointer_type':
             try:
                 pt = t.get_DIE_from_attribute('DW_AT_type')
-                return f"*{get_base_type(pt)}"
+                return f"pointer to {get_base_type(pt)}"
             except KeyError as e:
                 #logger.error(f"KeyError: {e}, caused by {t}")
                 print(f"KeyError: {e}, caused by {t}")
-                return "*<NO_TYPE>"
+                return "pointer to <NO_TYPE>"
         case 'DW_TAG_const_type':
             try:
                 pt = t.get_DIE_from_attribute('DW_AT_type')
@@ -240,15 +286,29 @@ def get_base_type(t) -> str:
             except KeyError as e:
                 # logger.error(f"KeyError: {e}, caused by {t}")
                 print(f"KeyError: {e}, caused by {t}")
-                return "const <NO_TYPE>"
+                return "const of <NO_TYPE>"
         case 'DW_TAG_typedef':
             try:
                 pt = t.get_DIE_from_attribute('DW_AT_type')
-                return f"{t.attributes['DW_AT_name'].value.decode('utf-8')} <{get_base_type(pt)}>"
+                return f"typedef {t.attributes['DW_AT_name'].value.decode('utf-8')} of type {get_base_type(pt)}"
             except KeyError as e:
                 # logger.error(f"KeyError: {e}, caused by {t}")
                 print(f"KeyError: {e}, caused by {t}")
-                return "typedef <NO_TYPE>"
+                return "typedef of <NO_TYPE>"
+        case 'DW_TAG_structure_type':
+            try:
+                return f"struct {t.attributes['DW_AT_name'].value.decode('utf-8')}"
+            except KeyError as e:
+                # logger.error(f"KeyError: {e}, caused by {t}")
+                print(f"KeyError: {e}, caused by {t}")
+                return "struct <NO_NAME>"
+        case 'DW_TAG_class_type':
+            try:
+                return f"class {t.attributes['DW_AT_name'].value.decode('utf-8')}"
+            except KeyError as e:
+                # logger.error(f"KeyError: {e}, caused by {t}")
+                print(f"KeyError: {e}, caused by {t}")
+                return "class <NO_DEFINITION>"
         case _:
             return ""
 
