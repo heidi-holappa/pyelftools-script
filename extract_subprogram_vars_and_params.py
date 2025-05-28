@@ -27,7 +27,7 @@ from elftools.dwarf.descriptions import (
     describe_DWARF_expr, set_global_machine_arch)
 from elftools.dwarf.locationlists import (
     LocationEntry, LocationExpr, LocationParser)
-
+from elftools.dwarf.descriptions import describe_form_class
 
 # Global logger
 logger = logging.getLogger(__name__)
@@ -106,11 +106,19 @@ def die_info_direct_child_of_cu(die, loc_list: list, loc_parser, CU, dwarfinfo, 
             if 'DW_AT_name' in die.attributes and  die.attributes['DW_AT_name'].value.decode('utf-8') == function:
                 print(indent_level + 'DIE tag=%s' % die.tag, end="\n")
                 for attr, value in die.attributes.items():
-                    if attr in ['DW_AT_name']:
-                        print(f"{indent_level}  | {attr}: {value.value.decode('utf-8')}", end="\n")
-                    if attr in ['DW_AT_type']:
-                        print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
-                        print(f"{indent_level}  | DW_AT_byte_size={get_base_type_size(die.get_DIE_from_attribute('DW_AT_type'))}")
+                    match attr:
+                        case 'DW_AT_name':
+                            print(f"{indent_level}  | {attr}: {value.value.decode('utf-8')}", end="\n")
+                        case 'DW_AT_type':
+                            print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
+                            print(
+                                f"{indent_level}  | DW_AT_byte_size={get_base_type_size(die.get_DIE_from_attribute('DW_AT_type'))}")
+                        case _:
+                            pass
+                lowpc, highpc = get_low_and_high_pc(die)
+                if lowpc and highpc:
+                    print(f"{indent_level}  | {'DW_AT_low_pc'}={lowpc}")
+                    print(f"{indent_level}  | {'DW_AT_high_pc'}={highpc}")
                 child_indent = indent_level + '  '
                 for child in die.iter_children():
                     die_info_rec(child, loc_list, loc_parser, CU, dwarfinfo, child_indent)
@@ -147,6 +155,29 @@ def die_info_direct_child_of_cu(die, loc_list: list, loc_parser, CU, dwarfinfo, 
 
 
 
+def get_low_and_high_pc(DIE):
+    lowpc = DIE.attributes['DW_AT_low_pc'].value
+
+    # DWARF v4 in section 2.17 describes how to interpret the
+    # DW_AT_high_pc attribute based on the class of its form.
+    # For class 'address' it's taken as an absolute address
+    # (similarly to DW_AT_low_pc); for class 'constant', it's
+    # an offset from DW_AT_low_pc.
+    highpc_attr = DIE.attributes['DW_AT_high_pc']
+    highpc_attr_class = describe_form_class(highpc_attr.form)
+    if highpc_attr_class == 'address':
+        highpc = highpc_attr.value
+    elif highpc_attr_class == 'constant':
+        highpc = lowpc + highpc_attr.value
+    else:
+        print('Error: invalid DW_AT_high_pc class:',
+              highpc_attr_class)
+        lowpc, highpce = None, None
+
+    return lowpc, highpc
+
+
+
 def die_info_rec(die, loc_list: list, loc_parser, CU, dwarfinfo, indent_level='    '):
     """ A recursive function for showing information about a DIE and its
         children.
@@ -162,6 +193,7 @@ def die_info_rec(die, loc_list: list, loc_parser, CU, dwarfinfo, indent_level=' 
                 if attr in ['DW_AT_type']:
                     print(f"{indent_level}  | {attr}={get_base_type(die.get_DIE_from_attribute('DW_AT_type'))}")
                     print(f"{indent_level}  | DW_AT_byte_size={get_base_type_size(die.get_DIE_from_attribute('DW_AT_type'))}")
+
 
                 if loc_parser.attribute_has_location(value, CU['version']):
                         line = f"{indent_level}  | "
